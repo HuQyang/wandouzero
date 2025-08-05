@@ -12,5 +12,6 @@ if __name__ == '__main__':
     flags.savedir = "mini_oracle_batch16"
     flags.use_wandb = False
     flags.save_interval = 20
+    flags.unroll_length = 60
     # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     train(flags)
