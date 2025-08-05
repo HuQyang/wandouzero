@@ -7,7 +7,7 @@ if __name__ == '__main__':
     flags.num_actors = 12
     flags.num_threads = 4
     flags.load_model = False
-    flags.batch_size = 64
+    flags.batch_size = 128
     flags.sleep_time = 20
     flags.savedir = "mini_oracle_batch16"
     flags.use_wandb = False
