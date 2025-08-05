@@ -20607,3 +20607,17 @@ wandb: 🚀 View run at https://wandb.ai/vi_inait/zero-training/runs/48w3lalx
  'mean_episode_return_landlord': -0.3466205596923828,
  'mean_episode_return_landlord_down': 0.3467513918876648,
  'mean_episode_return_landlord_up': 0.3660145103931427}
+[INFO:1058312 dmc:255 2025-08-05 13:59:43,693] Saving checkpoint to mini_oracle/douzero/model.tar
+[INFO:1058312 dmc:294 2025-08-05 13:59:43,957] After 1065600 (L:361600 U:342400 D:361600) frames: @ 104.0 fps (avg@ 106.6 fps) (L:35.2 U:33.6 D:35.2) Stats:
+{'actor_loss_landlord': 3.058850049972534,
+ 'actor_loss_landlord_down': 2.75919771194458,
+ 'actor_loss_landlord_up': 1.3401354551315308,
+ 'loss_landlord': 8.43674087524414,
+ 'loss_landlord_down': 7.905287265777588,
+ 'loss_landlord_up': 6.521299839019775,
+ 'mean_advantage_landlord': 0.6885972619056702,
+ 'mean_advantage_landlord_down': -0.6119163632392883,
+ 'mean_advantage_landlord_up': -0.2882709503173828,
+ 'mean_episode_return_landlord': -0.3590490520000458,
+ 'mean_episode_return_landlord_down': 0.3590228259563446,
+ 'mean_episode_return_landlord_up': 0.37818247079849243}
