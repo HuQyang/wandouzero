@@ -303,7 +303,7 @@ def train(flags):
                      position_fps['landlord_up'],
                      position_fps['landlord_down'],
                      pprint.pformat(stats))
-            if use_wandb:
+            if flags.use_wandb:
                 wandb.log({
                     **stats  # Unpack all stats keys and values
                 })
