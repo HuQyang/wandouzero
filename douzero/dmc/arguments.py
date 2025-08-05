@@ -66,3 +66,5 @@ parser.add_argument('--save_interval_frames', default=2999999, type=int,
                     help='Time interval (in minutes) at which to save the model')    
 parser.add_argument('--sleep_time', default=20, type=int,
                     help='Time to sleep')    
+parser.add_argument('--use_wandb', default=False, type=int,
+                    help='use_wandb')    
