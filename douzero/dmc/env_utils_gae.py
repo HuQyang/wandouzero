@@ -139,7 +139,7 @@ class Environment:
         if isinstance(reward, list):
             # 如果reward是列表，取最后一个值
             if len(reward) > 0:
-                current_reward = reward[-1]
+                current_reward = sum(reward)
             else:
                 current_reward = 0.0
         elif isinstance(reward, np.ndarray):

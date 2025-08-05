@@ -9,10 +9,15 @@ import numpy as np
 import torch
 from torch import multiprocessing as mp
 from torch import nn
+import torch.nn.functional as F
 
 from .file_writer import FileWriter
 from .models import Model
 from .utils import get_batch, log, create_env, create_buffers, create_optimizers, act
+
+from torch.distributions import Categorical
+
+
 
 mean_episode_return_buf = {p:deque(maxlen=100) for p in ['landlord', 'landlord_up', 'landlord_down']}
 
@@ -38,19 +43,53 @@ def learn(position,
     obs_x = torch.flatten(obs_x, 0, 1)
     obs_z = torch.flatten(batch['obs_z'].to(device), 0, 1).float()
     target = torch.flatten(batch['target'].to(device), 0, 1)
-    episode_returns = batch['episode_return'][batch['done']]
+    # episode_returns = batch['episode_return'][batch['done']]
+    episode_returns = batch['episode_return']
+    # print("episode_returns", episode_returns.shape, episode_returns[0,:])
+    # print("episode_returns batch done", batch['episode_return'][batch['done']].shape, batch['episode_return'][batch['done']])  # Debugging line to check shape and values
+    # print('batch[done]: ', batch['done'])
     mean_episode_return_buf[position].append(torch.mean(episode_returns).to(device))
-        
+    # print("obs_x",obs_x.shape)
+    obs_x_addition = torch.flatten(batch['obs_x_addition'].to(device), 0, 1).float() # <= NEW
+    # obs_advantage = torch.flatten(batch['advantage'].to(device), 0, 1).float() # <= NEW
+    # obs_rewards = torch.flatten(batch['obs_rewards'].to(device), 0, 1).float() # <= NEW
+    
     with lock:
-        learner_outputs = model(obs_z, obs_x, return_value=True)
-        loss = compute_loss(learner_outputs['values'], target)
+        learner_outputs = model(obs_z, obs_x,obs_x_addition, return_value=True)
+        v_pred = learner_outputs['critic_value'].squeeze(-1)  # from critic
+        actor_value = learner_outputs['actor_value'].squeeze(-1).clamp(-500, 500)  # from critic
+        
+        with torch.no_grad():
+            v_target = target
+            # advantage = (v_target - v_pred).detach()
+            advantage = (v_pred - v_target).detach()
+        
+        # v_target = target
+        # advantage = obs_advantage
+
+        # actor loss
+        coef = 0.05
+        actor_loss = -(1-coef)*actor_value * advantage + coef*F.mse_loss(actor_value, v_target.detach())
+
+        # critic loss
+        critic_loss = F.mse_loss(v_pred, v_target.detach())
+
+        # # entropy loss
+        # entropy = dist.entropy().mean()
+
+        # total loss
+        total_loss = actor_loss + critic_loss 
+        total_loss = total_loss.mean()
+
         stats = {
             'mean_episode_return_'+position: torch.mean(torch.stack([_r for _r in mean_episode_return_buf[position]])).item(),
-            'loss_'+position: loss.item(),
+            'loss_'+position: total_loss.item(),
+            'actor_loss_'+position: actor_loss.mean().item(),
+            'mean_advantage_'+position: torch.mean(advantage).item(),
         }
         
         optimizer.zero_grad()
-        loss.backward()
+        total_loss.backward()
         nn.utils.clip_grad_norm_(model.parameters(), flags.max_grad_norm)
         optimizer.step()
 
@@ -131,6 +170,8 @@ def train(flags):
         checkpoint_states = torch.load(
             checkpointpath, map_location=("cuda:"+str(flags.training_device) if flags.training_device != "cpu" else "cpu")
         )
+        print("Loading checkpoint from ",checkpoint_states.keys())
+        print("checkpointpath",checkpointpath)
         for k in ['landlord', 'landlord_up', 'landlord_down']:
             learner_model.get_model(k).load_state_dict(checkpoint_states["model_state_dict"][k])
             optimizers[k].load_state_dict(checkpoint_states["optimizer_state_dict"][k])
@@ -140,6 +181,26 @@ def train(flags):
         frames = checkpoint_states["frames"]
         position_frames = checkpoint_states["position_frames"]
         log.info(f"Resuming preempted job, current stats:\n{stats}")
+    
+    # Initialize wandb for logging
+    import wandb
+    wandb.init(
+        project="zero-training",
+        config={
+            "unroll_length": T,
+            "batch_size": B,
+            "num_actors": flags.num_actors,
+            "total_frames": flags.total_frames
+        }
+    )
+
+    # # Create a custom logger that also logs to wandb
+    class WandbLogger:
+        def log(self, stats_dict):
+            # Log all stats to wandb
+            wandb.log(stats_dict)
+            
+    plogger = WandbLogger()
 
     # Starting actor processes
     for device in device_iterator:
@@ -205,7 +266,7 @@ def train(flags):
         # Save the weights for evaluation purpose
         for position in ['landlord', 'landlord_up', 'landlord_down']:
             model_weights_dir = os.path.expandvars(os.path.expanduser(
-                '%s/%s/%s' % (flags.savedir, flags.xpid, position+'_weights_'+str(frames)+'.ckpt')))
+                '%s/%s' % (flags.savedir, position+str(frames)+'.ckpt')))
             torch.save(learner_model.get_model(position).state_dict(), model_weights_dir)
 
     fps_log = []
@@ -216,7 +277,7 @@ def train(flags):
             start_frames = frames
             position_start_frames = {k: position_frames[k] for k in position_frames}
             start_time = timer()
-            time.sleep(5)
+            time.sleep(flags.sleep_time)
 
             if timer() - last_checkpoint_time > flags.save_interval * 60:  
                 checkpoint(frames)
@@ -241,6 +302,10 @@ def train(flags):
                      position_fps['landlord_up'],
                      position_fps['landlord_down'],
                      pprint.pformat(stats))
+            
+            wandb.log({
+                **stats  # Unpack all stats keys and values
+            })
 
     except KeyboardInterrupt:
         return 

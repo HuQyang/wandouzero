@@ -1,11 +1,7 @@
 from collections import Counter
 import numpy as np
-import random
 
-from douzero.env.game import GameEnv
-from douzero.env.utils import ACTION_ENCODE_DIM, ENCODE_DIM
-# from douzero.env.oracle_claude import get_min_steps_to_win_with_mastercards
-from douzero.env.oracle_combi import get_min_step_small,get_min_step_large
+from douzero.env.game_alpha import GameEnv
 
 Card2Column = {3: 0, 4: 1, 5: 2, 6: 3, 7: 4, 8: 5, 9: 6, 10: 7,
                11: 8, 12: 9, 13: 10, 14: 11, 17: 12}
@@ -16,8 +12,6 @@ NumOnes2Array = {0: np.array([0, 0, 0, 0]),
                  3: np.array([1, 1, 1, 0]),
                  4: np.array([1, 1, 1, 1])}
 
-WILD_ALL_RANKS = [3,4,5,6,7,8,9,10,11,12,13,14,17]
-
 deck = []
 for i in range(3, 15):
     deck.extend([i for _ in range(4)])
@@ -25,15 +19,26 @@ deck.extend([17 for _ in range(4)])
 deck.extend([20, 30])
 
 global_mastercard_values = []
-
+ACTION_ENCODE_DIM = 67
+ENCODE_DIM = 5
 
 class Env:
     """
     Doudizhu multi-agent wrapper
     """
-    def __init__(self, objective,show_action=False,use_oracle_reward=True):
+    def __init__(self, objective,show_action=False):
+        """
+        Objective is wp/adp/logadp. It indicates whether considers
+        bomb in reward calculation. Here, we use dummy agents.
+        This is because, in the orignial game, the players
+        are `in` the game. Here, we want to isolate
+        players and environments to have a more gym style
+        interface. To achieve this, we use dummy players
+        to play. For each move, we tell the corresponding
+        dummy player which action to play, then the player
+        will perform the actual action in the game engine.
+        """
         self.objective = objective
-        self.use_oracle_reward = use_oracle_reward
 
         # Initialize players
         # We use three dummy player for the target position
@@ -48,11 +53,6 @@ class Env:
 
         self.infoset = None
 
-        self.pre_Adv = 0
-        self.N_landlord = 20
-        self.N_landlord_down = 17
-        self.N_landlord_up = 17
-
     def reset(self):
         """
         Every time reset is called, the environment
@@ -64,8 +64,7 @@ class Env:
         # Randomly shuffle the deck
         _deck = deck.copy()
         np.random.shuffle(_deck)
-        # self.mastercard_list = np.random.choice(range(3, 15), 2, replace=False)
-        self.mastercard_list = random.choices(WILD_ALL_RANKS, k=2)
+        self.mastercard_list = np.random.choice(range(3, 15), 2, replace=False)
         # self.mastercard_list = []
         set_global_mastercards(self.mastercard_list)
         card_play_data = {'landlord': _deck[:20],
@@ -80,11 +79,17 @@ class Env:
         # Initialize the cards
         self._env.card_play_init(card_play_data)
         self.infoset = self._game_infoset
-        self.pre_adv = 0
 
         return get_obs(self.infoset)
 
     def step(self, action):
+        """
+        Step function takes as input the action, which
+        is a list of integers, and output the next obervation,
+        reward, and a Boolean variable indicating whether the
+        current game is finished. It also returns an empty
+        dictionary that is reserved to pass useful information.
+        """
         assert action in self.infoset.legal_actions
         self.players[self._acting_player_position].set_action(action)
         self._env.step()
@@ -93,55 +98,65 @@ class Env:
         reward = 0.0
         if self._game_over:
             done = True
-            reward = self._get_reward()
+            # reward = self._get_reward()
+            reward = {
+                "play": {
+                    "landlord": self._get_reward("landlord") / 2,
+                    "landlord_down": self._get_reward("landlord_down"),
+                    "landlord_up": self._get_reward("landlord_up"),
+                }
+            }
+            obs = None
         else:
-            reward = self._get_oracle_reward() if self.use_oracle_reward else 0.0
-
-        # print("reward: ",self._acting_player_position, reward)
-        obs = None if done else get_obs(self.infoset)
+            obs = get_obs(self.infoset)
         return obs, reward, done, {}
 
-    def _get_reward(self):
-        """
-        This function is called in the end of each
-        game. It returns either 1/-1 for win/loss,
-        or ADP, i.e., every bomb will double the score.
-        """
+    # def _get_reward(self):
+    #     """
+    #     This function is called in the end of each
+    #     game. It returns either 1/-1 for win/loss,
+    #     or ADP, i.e., every bomb will double the score.
+    #     """
+    #     winner = self._game_winner
+    #     bomb_num = self._game_bomb_num
+    #     if winner == 'landlord':
+    #         if self.objective == 'adp':
+    #             return 2.0 ** bomb_num
+    #         elif self.objective == 'logadp':
+    #             return bomb_num + 1.0
+    #         else:
+    #             return 1.0
+    #     else:
+    #         if self.objective == 'adp':
+    #             return -2.0 ** bomb_num
+    #         elif self.objective == 'logadp':
+    #             return -bomb_num - 1.0
+    #         else:
+    #             return -1.0
+
+    def _get_reward(self, pos):
         winner = self._game_winner
+
         bomb_num = self._game_bomb_num
-        if winner == 'landlord':
-            if self.objective == 'adp':
-                return 10 * 2.0 ** bomb_num
-            elif self.objective == 'logadp':
-                return bomb_num + 1.0
-            else:
-                return 10.0 
+        bid_count = 1
+
+        multiply = 2
+        if pos != 'landlord':
+            pos = 'farmer'
+            multiply = 1
+
+        if bomb_num == 0:
+            r = bid_count
+        elif bomb_num == 1:
+            r = bid_count * (1 + bomb_num)
         else:
-            if self.objective == 'adp':
-                return -10 * 2.0 ** bomb_num
-            elif self.objective == 'logadp':
-                return -bomb_num - 1.0
-            else:
-                return -10.0 
-    
+            r = bid_count * (2 + 2 * (bomb_num - 1))
 
-    def _get_oracle_reward(self):
-        N_landlord = self._env.info_sets['landlord'].min_step
-        N_landlord_up = self._env.info_sets['landlord_up'].min_step
-        N_landlord_down = self._env.info_sets['landlord_down'].min_step
-        # Adv = self.N_landlord - min(self.N_landlord_down, N_landlord_up)
-        Adv = min(N_landlord_down, N_landlord_up) - N_landlord
-        delta_adv = Adv - self.pre_Adv
-        self.pre_Adv = Adv
-
-        coef = 0.2 if self._env.acting_player_position == 'landlord' else 0.1
-        reward =  coef * delta_adv
-
-        # print('delta_adv',self._env.acting_player_position,N_landlord,N_landlord_down,N_landlord_up, delta_adv,self.pre_Adv,reward)
-
-        return reward
-    
-
+        if pos == winner:
+            return r * multiply / 24
+        else:
+            return -r * multiply / 24
+        
     @property
     def _game_infoset(self):
         """
@@ -210,7 +225,7 @@ class DummyAgent(object):
         """
         self.action = action
 
-def get_obs(infoset,resnet_model=False):
+def get_obs(infoset,new_model=True):
     """
     This function obtains observations with imperfect information
     from the infoset. It has three branches since we encode
@@ -234,7 +249,7 @@ def get_obs(infoset,resnet_model=False):
 
     `z`: same as z_batch but not a batch.
     """
-    if resnet_model==True:
+    if new_model==True:
         return _get_obs_resnet(infoset)
     else:
         if infoset.player_position == 'landlord':
@@ -262,6 +277,7 @@ def _cards2array(list_cards):
     the six entries that are always zero and flatten the
     the representations.
     """
+    # print("list_cards in cards2array",list_cards)
     if len(list_cards) == 0:
         return np.zeros(ACTION_ENCODE_DIM, dtype=np.int8)
 
@@ -273,20 +289,15 @@ def _cards2array(list_cards):
             
         if card < 20:
             matrix[0:4, Card2Column[card]] = NumOnes2Array[num_times]
-            # if is_mastercard(card):  
-            #     matrix[4, Card2Column[card]] = 1
+            if is_mastercard(card):  
+                matrix[4, Card2Column[card]] = 1
         elif card == 20:
             jokers[0] = 1
         elif card == 30:
             jokers[1] = 1
-
-    for mcard in global_mastercard_values:
-        matrix[4, Card2Column[mcard]] = 1
-    # print("matrix: ", global_mastercard_values,matrix.shape, matrix)
     return np.concatenate((matrix.flatten('F'), jokers))
 
-
-def _action_seq_list2array(action_seq_list):
+def _action_seq_list2array_lstm(action_seq_list):
     """
     A utility function to encode the historical moves.
     We encode the historical 15 actions. If there is
@@ -303,17 +314,42 @@ def _action_seq_list2array(action_seq_list):
     return action_seq_array
 
 
-def _process_action_seq(sequence, length=15):
-    """
-    A utility function encoding historical moves. We
-    encode 15 moves. If there is no 15 moves, we pad
-    with zeros.
-    """
+def _action_seq_list2array(action_seq_list):
+    action_seq_array = np.ones((len(action_seq_list), ACTION_ENCODE_DIM)) * -1  # Default Value -1 for not using area
+    for row, list_cards in enumerate(action_seq_list):
+        # print("list_cards",list_cards)
+        if list_cards != []:
+            # print("list_cards in action seq loop",list_cards)
+            # action_seq_array[row, :ACTION_ENCODE_DIM] = _cards2array(list_cards[1])
+            action_seq_array[row, :ACTION_ENCODE_DIM] = _cards2array(list_cards)
+    # print("action_seq_array",action_seq_array.shape)
+    # action_seq_array = action_seq_array.reshape(5, 3*ACTION_ENCODE_DIM)
+    return action_seq_array
+
+
+# def _process_action_seq(sequence, length=15):
+#     """
+#     A utility function encoding historical moves. We
+#     encode 15 moves. If there is no 15 moves, we pad
+#     with zeros.
+#     """
+#     sequence = sequence[-length:].copy()
+#     if len(sequence) < length:
+#         empty_sequence = [[] for _ in range(length - len(sequence))]
+#         empty_sequence.extend(sequence)
+#         sequence = empty_sequence
+#     return sequence
+
+def _process_action_seq(sequence, length=15, new_model=True):
     sequence = sequence[-length:].copy()
+    sequence = sequence[::-1]
     if len(sequence) < length:
         empty_sequence = [[] for _ in range(length - len(sequence))]
-        empty_sequence.extend(sequence)
-        sequence = empty_sequence
+        if new_model:
+            sequence.extend(empty_sequence)
+        else:
+            empty_sequence.extend(sequence)
+            sequence = empty_sequence
     return sequence
 
 def _get_one_hot_bomb(bomb_num):
@@ -330,11 +366,6 @@ def _get_obs_landlord(infoset):
     Obttain the landlord features. See Table 4 in
     https://arxiv.org/pdf/2106.06135.pdf
     """
-
-    player_id = 'landlord'
-    prev_id = 'landlord_up'
-    next_id = 'landlord_down'
-
     num_legal_actions = len(infoset.legal_actions)
     my_handcards = _cards2array(infoset.player_hand_cards)
     my_handcards_batch = np.repeat(my_handcards[np.newaxis, :],
@@ -352,17 +383,7 @@ def _get_obs_landlord(infoset):
     for j, action in enumerate(infoset.legal_actions):
         my_action_batch[j, :] = _cards2array(action)
     
-    last_landlord_up_action = _cards2array(
-        infoset.last_move_dict['landlord_up'])
-    last_landlord_up_action_batch = np.repeat(
-        last_landlord_up_action[np.newaxis, :],
-        num_legal_actions, axis=0)
-    
-    last_landlord_down_action = _cards2array(
-        infoset.last_move_dict['landlord_down'])
-    last_landlord_down_action_batch = np.repeat(
-        last_landlord_down_action[np.newaxis, :],
-        num_legal_actions, axis=0)
+    print("my action batch",my_action_batch.shape)
 
     landlord_up_num_cards_left = _get_one_hot_array(
         infoset.num_cards_left_dict['landlord_up'], 17)
@@ -393,88 +414,35 @@ def _get_obs_landlord(infoset):
     bomb_num_batch = np.repeat(
         bomb_num[np.newaxis, :],
         num_legal_actions, axis=0)
-    
-    # NEW: 
-    control_flag = infoset.control_flag
-    control_flag = np.array(control_flag).reshape(1)
-    control_flag_batch = np.repeat(control_flag[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-    
-    landlord_min_step = infoset.min_steps['landlord']
-    landlord_min_step = np.array(landlord_min_step).reshape(1)
-    landlord_min_step_batch = np.repeat(landlord_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_down_min_step = infoset.min_steps['landlord_down']
-    landlord_down_min_step = np.array(landlord_down_min_step).reshape(1)
-    landlord_down_min_step_batch = np.repeat(landlord_down_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_up_min_step = infoset.min_steps['landlord_up']
-    landlord_up_min_step = np.array(landlord_up_min_step).reshape(1)
-    landlord_up_min_step_batch = np.repeat(landlord_up_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-    # print('in obs', landlord_min_step,landlord_down_min_step,landlord_up_min_step)
-    
-    landlord_up_hand = _cards2array(infoset.all_handcards['landlord_up'])
-    landlord_up_hand_batch = np.repeat(landlord_up_hand[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-    
-    landlord_down_hand = _cards2array(infoset.all_handcards['landlord_down'])
-    landlord_down_hand_batch = np.repeat(landlord_down_hand[np.newaxis, :],
-                                   num_legal_actions, axis=0) 
-
-    # unplayed_cards = _cards2array(infoset.unplayed_cards)
-    # unplayed_cards_batch = np.repeat(unplayed_cards[np.newaxis, :],
-    #                                num_legal_actions, axis=0)
 
     x_batch = np.hstack((my_handcards_batch, # 67
                          other_handcards_batch,# 67
-                         last_landlord_up_action_batch,#67
-                         last_landlord_down_action_batch, # 67
                          last_action_batch,# 67
                          landlord_up_played_cards_batch,# 67
                          landlord_down_played_cards_batch,# 67
                          landlord_up_num_cards_left_batch,# 17
                          landlord_down_num_cards_left_batch,# 17
                          bomb_num_batch,# 15
-                         control_flag_batch, # 1 
-                         landlord_min_step_batch, # 1
                          my_action_batch)) # 67
+
+    print("x_batch",x_batch.shape)
+
     
-  
     x_no_action = np.hstack((my_handcards,
                              other_handcards,
-                             last_landlord_up_action,
-                             last_landlord_down_action,
                              last_action,
                              landlord_up_played_cards,
                              landlord_down_played_cards,
                              landlord_up_num_cards_left,
-                             landlord_down_num_cards_left,    
-                             bomb_num,
-                             control_flag,
-                             landlord_min_step))
-    # print('lord xbath',x_batch.shape, x_no_action.shape)
+                             landlord_down_num_cards_left,
+                             bomb_num))
+    
     z = _action_seq_list2array(_process_action_seq(
         infoset.card_play_action_seq))
     z_batch = np.repeat(
         z[np.newaxis, :, :],
         num_legal_actions, axis=0)
-    x_addition_batch = np.hstack([
-        landlord_up_hand_batch,
-        landlord_down_hand_batch,
-        landlord_up_min_step_batch,
-        landlord_down_min_step_batch,
-    ])
-    x_addition = np.hstack([
-        landlord_up_hand,
-        landlord_down_hand,
-        landlord_up_min_step,
-        landlord_down_min_step,
-    ])
-
-
+    print("z_batch",z_batch.shape)
     obs = {
             'position': 'landlord',
             'x_batch': x_batch.astype(np.float32),
@@ -482,19 +450,14 @@ def _get_obs_landlord(infoset):
             'legal_actions': infoset.legal_actions,
             'x_no_action': x_no_action.astype(np.int8),
             'z': z.astype(np.int8),
-            'x_addition': x_addition.astype(np.int8), # <= NEW
-            'x_addition_batch': x_addition_batch.astype(np.float32), # <= NEW
           }
     return obs
+
 def _get_obs_landlord_up(infoset):
     """
     Obttain the landlord_up features. See Table 5 in
     https://arxiv.org/pdf/2106.06135.pdf
     """
-    player_id = 'landlord_up'
-    prev_id = 'landlord_down'
-    next_id = 'landlord'
-
     num_legal_actions = len(infoset.legal_actions)
     my_handcards = _cards2array(infoset.player_hand_cards)
     my_handcards_batch = np.repeat(my_handcards[np.newaxis, :],
@@ -517,7 +480,6 @@ def _get_obs_landlord_up(infoset):
     last_landlord_action_batch = np.repeat(
         last_landlord_action[np.newaxis, :],
         num_legal_actions, axis=0)
-
     landlord_num_cards_left = _get_one_hot_array(
         infoset.num_cards_left_dict['landlord'], 20)
     landlord_num_cards_left_batch = np.repeat(
@@ -552,52 +514,18 @@ def _get_obs_landlord_up(infoset):
     bomb_num_batch = np.repeat(
         bomb_num[np.newaxis, :],
         num_legal_actions, axis=0)
-    
-    # NEW: 
-    # control_flag = 1.0 if infoset.last_pid == player_id else 0.0
-    control_flag = infoset.control_flag
-    control_flag = np.array(control_flag).reshape(1)
-    control_flag_batch = np.repeat(control_flag[np.newaxis, :],
-                                   num_legal_actions, axis=0)
 
-    landlord_min_step = infoset.min_steps['landlord']
-    landlord_min_step = np.array(landlord_min_step).reshape(1)
-    landlord_min_step_batch = np.repeat(landlord_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_down_min_step = infoset.min_steps['landlord_down']
-    landlord_down_min_step = np.array(landlord_down_min_step).reshape(1)
-    landlord_down_min_step_batch = np.repeat(landlord_down_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_up_min_step = infoset.min_steps['landlord_up']
-    landlord_up_min_step = np.array(landlord_up_min_step).reshape(1)
-    landlord_up_min_step_batch = np.repeat(landlord_up_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_hand = _cards2array(infoset.all_handcards['landlord'])
-    landlord_hand_batch = np.repeat(landlord_hand[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-    
-    teammate_hand = _cards2array(infoset.all_handcards['landlord_down'])
-    teammate_hand_batch = np.repeat(teammate_hand[np.newaxis, :],
-                                   num_legal_actions, axis=0) 
-
-    x_batch = np.hstack((my_handcards_batch, # 67
-                         other_handcards_batch, #67
-                         landlord_played_cards_batch, #67
-                         teammate_played_cards_batch,#67
-                         last_action_batch, #67
-                         last_landlord_action_batch, #67
-                         last_teammate_action_batch, #67
-                         landlord_num_cards_left_batch, # 20
-                         teammate_num_cards_left_batch, # 17
-                         bomb_num_batch, # 15
-                         control_flag_batch, # 1
-                         landlord_up_min_step_batch, # 1
-                         my_action_batch)) # 67
-
-
+    x_batch = np.hstack((my_handcards_batch,
+                         other_handcards_batch,
+                         landlord_played_cards_batch,
+                         teammate_played_cards_batch,
+                         last_action_batch,
+                         last_landlord_action_batch,
+                         last_teammate_action_batch,
+                         landlord_num_cards_left_batch,
+                         teammate_num_cards_left_batch,
+                         bomb_num_batch,
+                         my_action_batch))
 
     x_no_action = np.hstack((my_handcards,
                              other_handcards,
@@ -608,29 +536,12 @@ def _get_obs_landlord_up(infoset):
                              last_teammate_action,
                              landlord_num_cards_left,
                              teammate_num_cards_left,
-                             bomb_num,
-                             control_flag,
-                             landlord_up_min_step))
-    # print('up xbath',x_batch.shape, x_no_action.shape)
+                             bomb_num))
     z = _action_seq_list2array(_process_action_seq(
         infoset.card_play_action_seq))
-
     z_batch = np.repeat(
         z[np.newaxis, :, :],
         num_legal_actions, axis=0)
-    x_addition_batch = np.hstack([
-        landlord_hand_batch,
-        teammate_hand_batch,
-        landlord_min_step_batch,
-        landlord_down_min_step_batch
-    ])
-    x_addition = np.hstack([
-        landlord_hand,
-        teammate_hand,
-        landlord_min_step,
-        landlord_down_min_step
-    ])
-
     obs = {
             'position': 'landlord_up',
             'x_batch': x_batch.astype(np.float32),
@@ -638,8 +549,6 @@ def _get_obs_landlord_up(infoset):
             'legal_actions': infoset.legal_actions,
             'x_no_action': x_no_action.astype(np.int8),
             'z': z.astype(np.int8),
-            'x_addition': x_addition.astype(np.int8), # <= NEW
-            'x_addition_batch': x_addition_batch.astype(np.float32), # <= NEW
           }
     return obs
 
@@ -648,9 +557,6 @@ def _get_obs_landlord_down(infoset):
     Obttain the landlord_down features. See Table 5 in
     https://arxiv.org/pdf/2106.06135.pdf
     """
-    player_id = 'landlord_down'
-    prev_id = 'landlord'
-    next_id = 'landlord_up'
     num_legal_actions = len(infoset.legal_actions)
     my_handcards = _cards2array(infoset.player_hand_cards)
     my_handcards_batch = np.repeat(my_handcards[np.newaxis, :],
@@ -667,7 +573,7 @@ def _get_obs_landlord_down(infoset):
     my_action_batch = np.zeros(my_handcards_batch.shape)
     for j, action in enumerate(infoset.legal_actions):
         my_action_batch[j, :] = _cards2array(action)
-    
+
     last_landlord_action = _cards2array(
         infoset.last_move_dict['landlord'])
     last_landlord_action_batch = np.repeat(
@@ -713,36 +619,6 @@ def _get_obs_landlord_down(infoset):
     bomb_num_batch = np.repeat(
         bomb_num[np.newaxis, :],
         num_legal_actions, axis=0)
-    
-    # NEW: 
-    # control_flag = 1.0 if infoset.last_pid == player_id else 0.0
-    control_flag = infoset.control_flag
-    control_flag = np.array(control_flag).reshape(1)
-    control_flag_batch = np.repeat(control_flag[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_min_step = infoset.min_steps['landlord']
-    landlord_min_step = np.array(landlord_min_step).reshape(1)
-    landlord_min_step_batch = np.repeat(landlord_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_down_min_step = infoset.min_steps['landlord_down']
-    landlord_down_min_step = np.array(landlord_down_min_step).reshape(1)
-    landlord_down_min_step_batch = np.repeat(landlord_down_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_up_min_step = infoset.min_steps['landlord_up']
-    landlord_up_min_step = np.array(landlord_up_min_step).reshape(1)
-    landlord_up_min_step_batch = np.repeat(landlord_up_min_step[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-
-    landlord_hand = _cards2array(infoset.all_handcards['landlord'])
-    landlord_hand_batch = np.repeat(landlord_hand[np.newaxis, :],
-                                   num_legal_actions, axis=0)
-    
-    teammate_hand = _cards2array(infoset.all_handcards['landlord_up'])
-    teammate_hand_batch = np.repeat(teammate_hand[np.newaxis, :],
-                                   num_legal_actions, axis=0)                               
 
     x_batch = np.hstack((my_handcards_batch,
                          other_handcards_batch,
@@ -754,11 +630,7 @@ def _get_obs_landlord_down(infoset):
                          landlord_num_cards_left_batch,
                          teammate_num_cards_left_batch,
                          bomb_num_batch,
-                         control_flag_batch,
-                         landlord_down_min_step_batch,
                          my_action_batch))
-
-   
     x_no_action = np.hstack((my_handcards,
                              other_handcards,
                              landlord_played_cards,
@@ -768,33 +640,12 @@ def _get_obs_landlord_down(infoset):
                              last_teammate_action,
                              landlord_num_cards_left,
                              teammate_num_cards_left,
-                             bomb_num,
-                             control_flag,
-                             landlord_down_min_step))
-
-    # print('down xbath',x_batch.shape, x_no_action.shape)
+                             bomb_num))
     z = _action_seq_list2array(_process_action_seq(
         infoset.card_play_action_seq))
     z_batch = np.repeat(
         z[np.newaxis, :, :],
         num_legal_actions, axis=0)
-    
-    x_addition_batch = np.hstack([
-        landlord_hand_batch,
-        teammate_hand_batch,
-        landlord_min_step_batch,
-        landlord_up_min_step_batch
-    ])
-    x_addition = np.hstack([
-        landlord_hand,
-        teammate_hand,
-        landlord_min_step,
-        landlord_up_min_step
-    ])
-
-    # print("down x_addition_batch.shape: ", x_addition_batch.shape)
-    # print("down x_batch.shape: ", x_batch.shape)
-
     obs = {
             'position': 'landlord_down',
             'x_batch': x_batch.astype(np.float32),
@@ -802,8 +653,6 @@ def _get_obs_landlord_down(infoset):
             'legal_actions': infoset.legal_actions,
             'x_no_action': x_no_action.astype(np.int8),
             'z': z.astype(np.int8),
-            'x_addition': x_addition.astype(np.int8), # <= NEW
-            'x_addition_batch': x_addition_batch.astype(np.float32), # <= NEW
           }
     return obs
 
@@ -813,8 +662,104 @@ def set_global_mastercards(mastercard_list):
     global global_mastercard_values
     # Filter out jokers (20 and 30) from mastercard list
     global_mastercard_values = [card for card in mastercard_list if card < 20]
-    
+    # print(f"Global mastercards set to: {global_mastercard_values}")
+
 
 def is_mastercard(card):
     """Check if a card is a mastercard (jokers are never mastercards)."""
     return card in global_mastercard_values and card < 20  # Jokers (20,30) are never mastercards
+
+
+def _get_obs_resnet(infoset):
+    num_legal_actions = len(infoset.legal_actions)
+    my_handcards = _cards2array(infoset.player_hand_cards)
+    my_handcards_batch = np.repeat(my_handcards[np.newaxis, :],
+                                   num_legal_actions, axis=0)
+
+    other_handcards = _cards2array(infoset.other_hand_cards)
+
+    three_landlord_cards = _cards2array(infoset.three_landlord_cards)
+
+    my_action_batch = np.zeros(my_handcards_batch.shape)
+    for j, action in enumerate(infoset.legal_actions):
+        my_action_batch[j, :] = _cards2array(action)
+
+    landlord_num_cards_left = _get_one_hot_array(
+        infoset.num_cards_left_dict['landlord'], 20)
+
+    landlord_up_num_cards_left = _get_one_hot_array(
+        infoset.num_cards_left_dict['landlord_up'], 17)
+
+    landlord_down_num_cards_left = _get_one_hot_array(
+        infoset.num_cards_left_dict['landlord_down'], 17)
+
+    landlord_played_cards = _cards2array(
+        infoset.played_cards['landlord'])
+
+    landlord_up_played_cards = _cards2array(
+        infoset.played_cards['landlord_up'])
+
+    landlord_down_played_cards = _cards2array(
+        infoset.played_cards['landlord_down'])
+
+    # bid_info_z = np.multiply(bid_info, np.ones((54, 3))).transpose((1, 0))
+
+    bomb_num = _get_one_hot_bomb(
+        infoset.bomb_num)
+    bomb_num_batch = np.repeat(
+        bomb_num[np.newaxis, :],
+        num_legal_actions, axis=0)
+    
+    num_cards_left = np.hstack((
+                         landlord_num_cards_left,  # 20
+                         landlord_up_num_cards_left,  # 17
+                         landlord_down_num_cards_left))
+
+    num_mastercards_left = np.zeros(13)
+    i = 0
+    for p in ['landlord', 'landlord_up', 'landlord_down']:
+        for card in infoset.played_cards[p]:
+            if card in global_mastercard_values:
+                i += 1
+
+    num_mastercards_left[(8-i)-1] = 1
+     
+    num_cards_left = np.hstack((num_cards_left, num_mastercards_left))
+  
+
+    x_batch = np.hstack((
+                        #  bid_info_batch,  # 3
+                         bomb_num_batch,  # 15
+                         ))
+    x_no_action = np.hstack((
+                            #  bid_info,
+                             bomb_num, # 15
+                             ))
+
+
+    z = np.vstack((
+                  num_cards_left,  # 67
+                  my_handcards,  # 67
+                  other_handcards,  # 67
+                  three_landlord_cards,  # 67
+                  landlord_played_cards,  # 67
+                  landlord_up_played_cards,  # 67
+                  landlord_down_played_cards,  # 67
+                  _action_seq_list2array(_process_action_seq(infoset.card_play_action_seq, 60)) # （60,67）
+                  ))
+
+    _z_batch = np.repeat(
+        z[np.newaxis, :, :],
+        num_legal_actions, axis=0)
+    my_action_batch = my_action_batch[:, np.newaxis, :]
+    z_batch = np.concatenate((my_action_batch, _z_batch), axis=1)
+    
+    obs = {
+        'position': infoset.player_position,
+        'x_batch': x_batch.astype(np.float32),
+        'z_batch': z_batch.astype(np.float32),
+        'legal_actions': infoset.legal_actions,
+        'x_no_action': x_no_action.astype(np.int8),
+        'z': z.astype(np.int8),
+    }
+    return obs

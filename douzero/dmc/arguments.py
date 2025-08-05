@@ -5,7 +5,7 @@ parser = argparse.ArgumentParser(description='DouZero: PyTorch DouDizhu AI')
 # General Settings
 parser.add_argument('--xpid', default='douzero',
                     help='Experiment id (default: douzero)')
-parser.add_argument('--save_interval', default=30, type=int,
+parser.add_argument('--save_interval', default=120, type=int,
                     help='Time interval (in minutes) at which to save the model')    
 parser.add_argument('--objective', default='adp', type=str, choices=['adp', 'wp', 'logadp'],
                     help='Use ADP or WP as reward (default: ADP)')    
@@ -53,3 +53,16 @@ parser.add_argument('--momentum', default=0, type=float,
                     help='RMSProp momentum')
 parser.add_argument('--epsilon', default=1e-5, type=float,
                     help='RMSProp epsilon')
+parser.add_argument('--gamma', default=0.99, type=float,
+                    help='gamma epsilon')
+parser.add_argument('--gae_lambda', default=0.95, type=float,
+                    help='gae_lambda epsilon')
+
+
+
+parser.add_argument('--show_action', default=False, help='Show action in evaluation mode')
+parser.add_argument('--use_oracle_reward', default=True, help='true if use oracle reward')
+parser.add_argument('--save_interval_frames', default=2999999, type=int,
+                    help='Time interval (in minutes) at which to save the model')    
+parser.add_argument('--sleep_time', default=20, type=int,
+                    help='Time to sleep')    

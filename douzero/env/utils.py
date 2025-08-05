@@ -28,6 +28,12 @@ PASS = 0
 CALL = 1
 RAISE = 2
 
+# 
+ACTION_ENCODE_DIM = 67
+ENCODE_DIM = 5
+
+X_DIM = 452
+
 # return all possible results of selecting num cards from cards list
 def select(cards, num):
     return [list(i) for i in itertools.combinations(cards, num)]

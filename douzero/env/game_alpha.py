@@ -1,7 +1,6 @@
 from copy import deepcopy
 from . import move_detector as md, move_selector as ms
 from .move_generator import MovesGener
-from douzero.env.oracle_combi import get_min_step_small,get_min_step_large
 
 EnvCard2RealCard = {3: '3', 4: '4', 5: '5', 6: '6', 7: '7',
                     8: '8', 9: '9', 10: '10', 11: 'J', 12: 'Q',
@@ -38,8 +37,6 @@ class GameEnv(object):
                              'landlord_up': [],
                              'landlord_down': []}
 
-        # self.all_unplayed_cards = self.generate_initial_card()
-
         self.last_move = []
         self.last_two_moves = []
 
@@ -58,22 +55,6 @@ class GameEnv(object):
 
         self.show_action = show_action
         self.mode = mode
-        self.rival_move_type = md.TYPE_0_PASS
-        self.control_flag = 0.0
-
-        self.N_landlord = 20
-        self.N_landlord_down = 17
-        self.N_landlord_up = 17
-
-    def generate_initial_card(self):
-        init_all_cards = []
-        for i in range(3,15):
-            init_all_cards.extend([i] * 4)
-        init_all_cards.extend([17] * 4)
-        init_all_cards.extend([20])
-        init_all_cards.extend([30])
-        
-        return init_all_cards
 
     def card_play_init(self, card_play_data):
         self.info_sets['landlord'].player_hand_cards = \
@@ -84,11 +65,6 @@ class GameEnv(object):
             card_play_data['landlord_down']
         self.three_landlord_cards = card_play_data['three_landlord_cards']
         self.mastercard_list = card_play_data['mastercard_list']
-
-        self.info_sets['landlord'].min_step = get_min_step_large(card_play_data['landlord'],self.mastercard_list)
-        self.info_sets['landlord_up'].min_step = get_min_step_large(card_play_data['landlord_up'],self.mastercard_list)
-        self.info_sets['landlord_down'].min_step = get_min_step_large(card_play_data['landlord_down'],self.mastercard_list)
-
         self.get_acting_player_position()
         self.game_infoset = self.get_infoset()
 
@@ -127,16 +103,48 @@ class GameEnv(object):
 
     def get_bomb_num(self):
         return self.bomb_num
-    
-    def is_bomb(self, action):
-        regular_card = sorted([i for i in action if i not in self.mastercard_list])
-        if len(action) >= 4 :
-            if len(regular_card) == 0 or len(set(regular_card)) == 1:
-                # If there are at least 4 cards and all are the same, it's a bomb
-                return True
-        
-        return False
 
+    
+    # def step(self):
+    #     action = self.players[self.acting_player_position].act(
+    #         self.game_infoset)
+    #     assert action in self.game_infoset.legal_actions
+
+    #     if len(action) > 0:
+    #         self.last_pid = self.acting_player_position
+
+    #     if action in bombs:
+    #         self.bomb_num += 1
+
+    #     self.last_move_dict[
+    #         self.acting_player_position] = action.copy()
+
+    #     self.card_play_action_seq.append(action)
+    #     self.update_acting_player_hand_cards(action)
+
+    #     self.played_cards[self.acting_player_position] += action
+
+    #     # Print who played what cards
+    #     if self.show_action:
+    #         if action != 'pass':
+    #             print(f"{self.acting_player_position} plays: {action}")
+    #         else:
+    #             print(f"{self.acting_player_position} passes")
+
+    #     if self.acting_player_position == 'landlord' and \
+    #             len(action) > 0 and \
+    #             len(self.three_landlord_cards) > 0:
+    #         for card in action:
+    #             if len(self.three_landlord_cards) > 0:
+    #                 if card in self.three_landlord_cards:
+    #                     self.three_landlord_cards.remove(card)
+    #             else:
+    #                 break
+
+    #     self.game_done()
+    #     if not self.game_over:
+    #         self.get_acting_player_position()
+    #         self.game_infoset = self.get_infoset()
     def step(self, action=None):
         if action is None:
             action = self.players[self.acting_player_position].act(self.game_infoset)
@@ -147,26 +155,24 @@ class GameEnv(object):
                 if action not in self.game_infoset.legal_actions:
                     print("illegal action, please try again")
                     return None
+                
         
         # assert action in self.game_infoset.legal_actions
+        # print("action in step ---- ",action)
 
         if len(action) > 0:
             self.last_pid = self.acting_player_position
 
-        # if action in bombs:
-        #     self.bomb_num += 1
-        if self.is_bomb(action):
+        if action in bombs:
             self.bomb_num += 1
 
         self.last_move_dict[self.acting_player_position] = action.copy()
         self.card_play_action_seq.append(action)
-
+        # print("card_play_action_seq",self.card_play_action_seq)
         self.update_acting_player_hand_cards(action)
-
-        self.update_hand_cards_seq(action)  # <= NEW
         self.played_cards[self.acting_player_position] += action
-        self.get_control_flag()
         
+
         if self.show_action:
             if action != 'pass' and len(action) > 0:
                 print(f"{self.acting_player_position} plays: {action}")
@@ -181,11 +187,8 @@ class GameEnv(object):
         self.game_done()
 
         if not self.game_over:
-            self.update_acting_layer_min_step() # <= NEW
             self.get_acting_player_position()
             self.game_infoset = self.get_infoset()
-        
-        # print("acting 3",self.acting_player_position,self.info_sets['landlord'].min_step,self.info_sets['landlord_down'].min_step,self.info_sets['landlord_up'].min_step)
 
         return self.game_infoset, None, self.game_over, None
 
@@ -206,7 +209,6 @@ class GameEnv(object):
             last_two_moves = last_two_moves[:2]
         return last_two_moves
 
-
     def get_acting_player_position(self):
         if self.acting_player_position is None:
             self.acting_player_position = 'landlord'
@@ -225,59 +227,34 @@ class GameEnv(object):
 
     def update_acting_player_hand_cards(self, action):
         if action != []:
+            # print(self.info_sets[self.acting_player_position],self.info_sets[self.acting_player_position].player_hand_cards)
             for card in action:
+                if card not in self.info_sets[self.acting_player_position].player_hand_cards:
+                    print("action that card not in hand: ----",action, self.mastercard_list)
+                    print("hand",self.info_sets[self.acting_player_position].player_hand_cards)
                 self.info_sets[
                     self.acting_player_position].player_hand_cards.remove(card)
             self.info_sets[self.acting_player_position].player_hand_cards.sort()
-    
-    def update_acting_layer_min_step(self):
-        if self.acting_player_position == 'landlord':
-            if len(self.info_sets[self.acting_player_position].player_hand_cards) > 15:
-                self.info_sets[self.acting_player_position].min_step = \
-                get_min_step_large(self.info_sets[self.acting_player_position].player_hand_cards,self.mastercard_list)
-            else:
-                self.info_sets[self.acting_player_position].min_step = \
-                get_min_step_small(self.info_sets[self.acting_player_position].player_hand_cards,self.mastercard_list)
-        else:
-            if len(self.info_sets[self.acting_player_position].player_hand_cards) > 12:
-                self.info_sets[self.acting_player_position].min_step = \
-                get_min_step_large(self.info_sets[self.acting_player_position].player_hand_cards,self.mastercard_list)
-            else:
-                self.info_sets[self.acting_player_position].min_step = \
-                get_min_step_small(self.info_sets[self.acting_player_position].player_hand_cards,self.mastercard_list)
-        
-
-    def update_hand_cards_seq(self, action):
-        self.info_sets[self.acting_player_position].handcards_seq.append(
-            self.info_sets[self.acting_player_position].player_hand_cards.copy())
-    
-
-    def get_control_flag(self):
-        if len(self.card_play_action_seq) >= 3:
-            if len(self.card_play_action_seq[-2]) == 0 and len(self.card_play_action_seq[-1]) == 0:
-                self.control_flag = 1.0
-            else:
-                self.control_flag = 0.0
-        else:
-            self.control_flag = 0.0
-
-        return self.control_flag
-    
-    def get_minstep(self):
-        
-        get_min_step_small(self.info_sets[self.acting_player_position].player_hand_cards,self.mastercard_list)
-
-        if len(hand_card['landlord']) > 15:
-                N_landlord = get_min_step_large(hand_card['landlord'],self.mastercard_list)
-        else:
-            N_landlord = get_min_step_small(hand_card['landlord'],self.mastercard_list)
 
     def get_legal_card_play_actions(self):
         mg = MovesGener(
             self.info_sets[self.acting_player_position].player_hand_cards,self.mastercard_list)
-        
+        action_sequence = self.card_play_action_seq
 
-        action_sequence = self.card_play_action_seq 
+        # print("action_sequence",action_sequence)
+
+        # rival_move = []
+        # if len(action_sequence) != 0:
+        #     if len(action_sequence[-1]) == 0:
+        #         rival_move = action_sequence[-2]
+        #     else:
+        #         rival_move = action_sequence[-1]
+
+        # rival_type = md.get_move_type(rival_move,self.mastercard_list)
+        # rival_move_type = rival_type['type']
+        # rival_move_len = rival_type.get('len', 1)
+        # moves = list()
+
         rival_move = []
         if len(action_sequence) != 0:
             if len(action_sequence[-1]) == 0:
@@ -314,9 +291,9 @@ class GameEnv(object):
                 for i in range(len(action_sequence)-1, 1, -1):
                     if len(action_sequence[i-2]) == 0 and len(action_sequence[i-1]) == 0:
                         rival_type = md.get_move_type(action_sequence[i], self.mastercard_list)
+                        # rival_type = md.get_move_type(rival_move, self.mastercard_list)
                         rival_move_type = rival_type['type']
                         rival_move_len = rival_type.get('len', 1)
-                        # self.control_flag = 1.0
                         break
                     elif md.get_move_type(rival_move,self.mastercard_list)['type'] == md.TYPE_4_BOMB:
                         rival_move_type = md.TYPE_4_BOMB
@@ -328,15 +305,14 @@ class GameEnv(object):
                         rival_type = md.get_move_type(action_sequence[0],self.mastercard_list)
                         rival_move_type = rival_type['type']
                         rival_move_len = rival_type.get('len', 1)
-        rival_move_len = len(rival_move)
-
-        self.rival_move_type = rival_move_type
+                        # print("action_sequence[0]", action_sequence[0])
+        # print("rival_move_type",rival_move,rival_move_type)
+        # print("rival_move",rival_move)
                     
         moves = list()
 
         if rival_move_type == md.TYPE_0_PASS:
             moves = mg.gen_moves()
-            all_legal_moves = moves.copy()
         elif rival_move_type == md.TYPE_1_SINGLE:
             all_moves = mg.gen_type_1_single()
             moves = ms.filter_type_1_single(all_moves, rival_move,self.mastercard_list)
@@ -362,6 +338,7 @@ class GameEnv(object):
 
         elif rival_move_type == md.TYPE_7_3_2:
             all_moves = mg.gen_type_7_3_2()
+            # print("all_moves in 7_3_2",all_moves)
             moves = ms.filter_type_7_3_2(all_moves, rival_move,self.mastercard_list)
 
         elif rival_move_type == md.TYPE_8_SERIAL_SINGLE:
@@ -369,19 +346,19 @@ class GameEnv(object):
             moves = ms.filter_type_8_serial_single(all_moves, rival_move,self.mastercard_list)
 
         elif rival_move_type == md.TYPE_9_SERIAL_PAIR:
-            all_moves = mg.gen_type_9_serial_pair(repeat_num=rival_move_len//2)
+            all_moves = mg.gen_type_9_serial_pair(repeat_num=rival_move_len)
             moves = ms.filter_type_9_serial_pair(all_moves, rival_move,self.mastercard_list)
 
         elif rival_move_type == md.TYPE_10_SERIAL_TRIPLE:
-            all_moves = mg.gen_type_10_serial_triple(repeat_num=rival_move_len//3)
+            all_moves = mg.gen_type_10_serial_triple(repeat_num=rival_move_len)
             moves = ms.filter_type_10_serial_triple(all_moves, rival_move,self.mastercard_list)
 
         elif rival_move_type == md.TYPE_11_SERIAL_3_1:
-            all_moves = mg.gen_type_11_serial_3_1(repeat_num=rival_move_len//4)
+            all_moves = mg.gen_type_11_serial_3_1(repeat_num=rival_move_len)
             moves = ms.filter_type_11_serial_3_1(all_moves, rival_move,self.mastercard_list)
 
         elif rival_move_type == md.TYPE_12_SERIAL_3_2:
-            all_moves = mg.gen_type_12_serial_3_2(repeat_num=rival_move_len//5)
+            all_moves = mg.gen_type_12_serial_3_2(repeat_num=rival_move_len)
             moves = ms.filter_type_12_serial_3_2(all_moves, rival_move,self.mastercard_list)
 
         elif rival_move_type == md.TYPE_13_4_2:
@@ -394,14 +371,18 @@ class GameEnv(object):
 
         if rival_move_type not in [md.TYPE_0_PASS,
                                    md.TYPE_4_BOMB, md.TYPE_5_KING_BOMB]:
-          
+            # print(" moves before bomb",moves)
             moves = moves + mg.gen_type_4_bomb() + mg.gen_type_5_king_bomb()
+            # print("all moves",moves)
 
         if len(rival_move) != 0:  # rival_move is not 'pass'
             moves = moves + [[]]
 
         # for m in moves:
         #     m.sort()
+        # print("inlegal",self.info_sets[self.acting_player_position],self.info_sets[self.acting_player_position].player_hand_cards)
+        # print("rest of the cards",self.info_sets[self.acting_player_position].player_hand_cards)
+        # print("final moves", moves)
 
         return moves
 
@@ -421,8 +402,6 @@ class GameEnv(object):
         self.played_cards = {'landlord': [],
                              'landlord_up': [],
                              'landlord_down': []}
-        
-        # self.all_unplayed_cards = self.generate_initial_card()
 
         self.last_move = []
         self.last_two_moves = []
@@ -433,11 +412,6 @@ class GameEnv(object):
 
         self.bomb_num = 0
         self.last_pid = 'landlord'
-        self.rival_move_type =  md.TYPE_0_PASS
-        self.control_flag = 0.0
-        self.N_landlord = 20
-        self.N_landlord_down = 17
-        self.N_landlord_up = 17
 
     def get_infoset(self):
         self.info_sets[
@@ -472,7 +446,6 @@ class GameEnv(object):
 
         self.info_sets[self.acting_player_position].played_cards = \
             self.played_cards
-        
         self.info_sets[self.acting_player_position].three_landlord_cards = \
             self.three_landlord_cards
         self.info_sets[self.acting_player_position].card_play_action_seq = \
@@ -483,19 +456,7 @@ class GameEnv(object):
             {pos: self.info_sets[pos].player_hand_cards
              for pos in ['landlord', 'landlord_up', 'landlord_down']}
         
-        self.info_sets[
-            self.acting_player_position].min_steps = \
-            {pos: self.info_sets[pos].min_step
-             for pos in ['landlord', 'landlord_up', 'landlord_down']}
-        
         self.info_sets[self.acting_player_position].mastercard_list = self.mastercard_list
-        self.info_sets[self.acting_player_position].rival_move_type = self.rival_move_type
-
-        # self.info_sets[self.acting_player_position].min_step = \
-        #     {pos: self.info_sets[pos].min_step
-        #      for pos in ['landlord', 'landlord_up', 'landlord_down']}
-
-        self.info_sets[self.acting_player_position].control_flag = self.control_flag
 
         return deepcopy(self.info_sets[self.acting_player_position])
 
@@ -536,12 +497,3 @@ class InfoSet(object):
         self.last_pid = None
         # The number of bombs played so far
         self.bomb_num = None
-
-        self.handcards_seq = []
-
-        self.rival_move_type = md.TYPE_0_PASS
-
-        self.control_flag = 0.0
-
-        self.min_step = 20
-        

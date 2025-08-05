@@ -123,7 +123,7 @@ class FileWriter:
         else:
             self._save_metadata()
 
-        self._logger.info('Saving messages to %s', self.paths['msg'])
+        # self._logger.info('Saving messages to %s', self.paths['msg'])
         if os.path.exists(self.paths['msg']):
             self._logger.warning('Path to message file already exists. '
                                  'New data will be appended.')
@@ -132,8 +132,8 @@ class FileWriter:
         fhandle.setFormatter(formatter)
         self._logger.addHandler(fhandle)
 
-        self._logger.info('Saving logs data to %s', self.paths['logs'])
-        self._logger.info('Saving logs\' fields to %s', self.paths['fields'])
+        # self._logger.info('Saving logs data to %s', self.paths['logs'])
+        # self._logger.info('Saving logs\' fields to %s', self.paths['fields'])
         if os.path.exists(self.paths['logs']):
             self._logger.warning('Path to log file already exists. '
                                  'New data will be appended.')

@@ -37,9 +37,9 @@ log.setLevel(logging.INFO)
 Buffers = typing.Dict[str, typing.List[torch.Tensor]]
 
 def create_env(flags):
-    return Env(flags.objective)
+    return Env(flags.objective,flags.show_action)
 
-def get_batch(free_queue,
+def  get_batch(free_queue,
               full_queue,
               buffers,
               flags,
@@ -87,14 +87,16 @@ def create_buffers(flags, device_iterator):
     for device in device_iterator:
         buffers[device] = {}
         for position in positions:
-            x_dim = 319 if position == 'landlord' else 430
+            # x_dim = 384 if position == 'landlord' else 521
+            x_dim = 520 if position == 'landlord' else 523 # 517 = 584-67
             specs = dict(
                 done=dict(size=(T,), dtype=torch.bool),
                 episode_return=dict(size=(T,), dtype=torch.float32),
                 target=dict(size=(T,), dtype=torch.float32),
                 obs_x_no_action=dict(size=(T, x_dim), dtype=torch.int8),
-                obs_action=dict(size=(T, 54), dtype=torch.int8),
-                obs_z=dict(size=(T, 5, 162), dtype=torch.int8),
+                obs_action=dict(size=(T, 67), dtype=torch.int8),
+                obs_z=dict(size=(T, 5, 201), dtype=torch.int8),
+                obs_x_addition=dict(size=(T, 136), dtype=torch.int8),
             )
             _buffers: Buffers = {key: [] for key in specs}
             for _ in range(flags.num_buffers):
@@ -128,6 +130,7 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
         obs_action_buf = {p: [] for p in positions}
         obs_z_buf = {p: [] for p in positions}
         size = {p: 0 for p in positions}
+        obs_x_addition_buf = {p: [] for p in positions}
 
         position, obs, env_output = env.initial()
 
@@ -135,13 +138,16 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
             while True:
                 obs_x_no_action_buf[position].append(env_output['obs_x_no_action'])
                 obs_z_buf[position].append(env_output['obs_z'])
+                obs_x_addition_buf[position].append(env_output['obs_x_addition'])
+
                 with torch.no_grad():
-                    agent_output = model.forward(position, obs['z_batch'], obs['x_batch'], flags=flags)
+                    agent_output = model.forward(position, obs['z_batch'], obs['x_batch'],obs['x_addition_batch'], flags=flags)
                 _action_idx = int(agent_output['action'].cpu().detach().numpy())
                 action = obs['legal_actions'][_action_idx]
                 obs_action_buf[position].append(_cards2tensor(action))
                 size[position] += 1
                 position, obs, env_output = env.step(action)
+                
                 if env_output['done']:
                     for p in positions:
                         diff = size[p] - len(target_buf[p])
@@ -150,7 +156,11 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
                             done_buf[p].append(True)
 
                             episode_return = env_output['episode_return'] if p == 'landlord' else -env_output['episode_return']
+                            # # print('util',p, episode_return)
+                            # episode_return = env_output['episode_return'] 
+                            
                             episode_return_buf[p].extend([0.0 for _ in range(diff-1)])
+
                             episode_return_buf[p].append(episode_return)
                             target_buf[p].extend([episode_return for _ in range(diff)])
                     break
@@ -167,6 +177,7 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
                         buffers[p]['obs_x_no_action'][index][t, ...] = obs_x_no_action_buf[p][t]
                         buffers[p]['obs_action'][index][t, ...] = obs_action_buf[p][t]
                         buffers[p]['obs_z'][index][t, ...] = obs_z_buf[p][t]
+                        buffers[p]['obs_x_addition'][index][t, ...] = obs_x_addition_buf[p][t]
                     full_queue[p].put(index)
                     done_buf[p] = done_buf[p][T:]
                     episode_return_buf[p] = episode_return_buf[p][T:]
@@ -174,6 +185,7 @@ def act(i, device, free_queue, full_queue, model, buffers, flags):
                     obs_x_no_action_buf[p] = obs_x_no_action_buf[p][T:]
                     obs_action_buf[p] = obs_action_buf[p][T:]
                     obs_z_buf[p] = obs_z_buf[p][T:]
+                    obs_x_addition_buf[p] = obs_x_addition_buf[p][T:]
                     size[p] -= T
 
     except KeyboardInterrupt:

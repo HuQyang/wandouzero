@@ -8,3 +8,8 @@ dist/
 douzero_checkpoints
 most_recent_model
 eval_data.pkl
+__pycache__
+wandb
+mini
+mini_oracle
+mini_oracle_batch16

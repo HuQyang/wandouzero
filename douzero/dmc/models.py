@@ -8,11 +8,14 @@ import numpy as np
 import torch
 from torch import nn
 
+from douzero.env.utils import ACTION_ENCODE_DIM, ENCODE_DIM
+
+
 class LandlordLstmModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.lstm = nn.LSTM(162, 128, batch_first=True)
-        self.dense1 = nn.Linear(373 + 128, 512)
+        self.lstm = nn.LSTM(ACTION_ENCODE_DIM*3, 128, batch_first=True)
+        self.dense1 = nn.Linear(384+ACTION_ENCODE_DIM + 128, 512)
         self.dense2 = nn.Linear(512, 512)
         self.dense3 = nn.Linear(512, 512)
         self.dense4 = nn.Linear(512, 512)
@@ -46,8 +49,8 @@ class LandlordLstmModel(nn.Module):
 class FarmerLstmModel(nn.Module):
     def __init__(self):
         super().__init__()
-        self.lstm = nn.LSTM(162, 128, batch_first=True)
-        self.dense1 = nn.Linear(484 + 128, 512)
+        self.lstm = nn.LSTM(ACTION_ENCODE_DIM*3, 128, batch_first=True)
+        self.dense1 = nn.Linear(589 + ACTION_ENCODE_DIM + 128, 512)
         self.dense2 = nn.Linear(512, 512)
         self.dense3 = nn.Linear(512, 512)
         self.dense4 = nn.Linear(512, 512)
@@ -76,13 +79,288 @@ class FarmerLstmModel(nn.Module):
                 action = torch.randint(x.shape[0], (1,))[0]
             else:
                 action = torch.argmax(x,dim=0)[0]
+
             return dict(action=action)
+
+
+
+import torch.nn.functional as F
+from torch.distributions import Categorical
+
+class LandlordPerfectDou(nn.Module):
+    def __init__(self,
+                 input_size=ACTION_ENCODE_DIM*3,
+                 lstm_hidden_size=128,
+                 lstm_num_layers=1,
+                 imperct_dim = 587, #452+67*2+1
+                 action_dim=1,
+                 critic_feature_dim = 723, # 586+ACTION_ENCODE_DIM*2+1,
+                 actor_mlp_sizes=[512,512,512,512,512,512, 1],
+                 critic_mlp_sizes=[512,512,512,512,512,512, 1]):
+        super().__init__()
+        
+        
+        self.actor_lstm = nn.LSTM(input_size,
+                                   lstm_hidden_size,
+                                   num_layers=lstm_num_layers,
+                                   batch_first=True)
+        
+        self.critic_lstm = nn.LSTM(input_size,
+                                   lstm_hidden_size,
+                                   num_layers=lstm_num_layers,
+                                   batch_first=True)
+        # self.shared_lstm = nn.LSTM(input_size,
+        #                            lstm_hidden_size,
+        #                            num_layers=lstm_num_layers,
+        #                            batch_first=True)
+        
+
+        actor_in_dim = lstm_hidden_size + imperct_dim 
+        self.actor_lstm = nn.LSTM(input_size, lstm_hidden_size, batch_first=True)
+        self.dense1 = nn.Linear(actor_in_dim, 512)
+        self.dense2 = nn.Linear(512, 512)
+        self.dense3 = nn.Linear(512, 512)
+        self.dense4 = nn.Linear(512, 512)
+        self.dense5 = nn.Linear(512, 512)
+        self.dense6 = nn.Linear(512, 512)
+        self.dense7 = nn.Linear(512, 1)
+        
+        critic_in_dim = lstm_hidden_size + critic_feature_dim
+        # print("critic_in_dim", critic_in_dim)
+        self.critic_lstm = nn.LSTM(input_size, lstm_hidden_size, batch_first=True)
+        self.critic_dense1 = nn.Linear(critic_in_dim, 512)
+        self.critic_dense2 = nn.Linear(512, 512)
+        self.critic_dense3 = nn.Linear(512, 512)
+        self.critic_dense4 = nn.Linear(512, 512)
+        self.critic_dense5 = nn.Linear(512, 512)
+        self.critic_dense6 = nn.Linear(512, 512)
+        self.critic_dense7 = nn.Linear(512, 1)
+
+    def forward(self, z, x, x_addition, return_value=False,flags=None,mode='train'):
+
+        if mode == 'train':
+            lstm_out, _ = self.actor_lstm(z)
+        else:
+            lstm_out, _ = self.critic_lstm(z)
+
+        lstm_out = lstm_out[:, -1, :]   # 取最后时刻输出
+        
+        emb_act = torch.cat([lstm_out,x], dim=-1)
+        # print('emb_act',emb_act.shape,x.shape,lstm_out.shape)
+        
+        emb_act = self.dense1(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense2(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense3(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense4(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense5(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense6(emb_act)
+        emb_act = torch.relu(emb_act)
+        actor_value = self.dense7(emb_act)
+        # actor_value = torch.sigmoid(actor_value)  # Ensure the output is in [0, 1] range
+        
+        cri_lstm_out, _ = self.critic_lstm(z)
+        cri_lstm_out = cri_lstm_out[:, -1, :]   # 取最后时刻输出
+
+        x_perfect = torch.cat([x, x_addition], dim=-1)
+
+        emb_cri = torch.cat([cri_lstm_out,x_perfect], dim=-1)
+        # print('emb_cri',emb_cri.shape,x_perfect.shape,cri_lstm_out.shape)
+        
+        emb_cri = self.critic_dense1(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense2(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense3(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense4(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense5(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense6(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        critic_value = self.critic_dense7(emb_cri)
+
+        if return_value:
+            return dict(critic_value=critic_value,actor_value=actor_value)
+        else:
+            if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+                action = torch.randint(critic_value.shape[0], (1,))[0]
+            else:
+                action = torch.argmax(critic_value,dim=0)[0]
+
+            return dict(action=action,critic_value=critic_value,actor_value=actor_value)
+
+
+
+class FarmerPerfectDou(nn.Module):
+    def __init__(self,
+                 input_size=ACTION_ENCODE_DIM*3,
+                 lstm_hidden_size=128,
+                 lstm_num_layers=1,
+                 imperct_dim = 590,
+                 action_dim=1,
+                 critic_feature_dim = 726,# 589+ACTION_ENCODE_DIM*2,
+                 actor_mlp_sizes=[512,512,512,512,512,512, 1],
+                 critic_mlp_sizes=[512,512,512,512,512,512, 1]):
+        super().__init__()
+        self.actor_lstm = nn.LSTM(input_size,
+                                   lstm_hidden_size,
+                                   num_layers=lstm_num_layers,
+                                   batch_first=True)
+        
+        self.critic_lstm = nn.LSTM(input_size,
+                                   lstm_hidden_size,
+                                   num_layers=lstm_num_layers,
+                                   batch_first=True)
+        # self.shared_lstm = nn.LSTM(input_size,
+        #                            lstm_hidden_size,
+        #                            num_layers=lstm_num_layers,
+        #                            batch_first=True)
+        
+
+        # Actor 分支
+        actor_layers = []
+        actor_in_dim = lstm_hidden_size + imperct_dim
+        # for h in actor_mlp_sizes:
+        #     actor_layers += [nn.Linear(actor_in_dim, h), nn.ReLU()]
+        #     actor_in_dim = h
+        # actor_layers.append(nn.Linear(actor_in_dim, action_dim))
+        # self.actor_head = nn.Sequential(*actor_layers)
+
+        self.actor_lstm = nn.LSTM(input_size, lstm_hidden_size, batch_first=True)
+        self.dense1 = nn.Linear(actor_in_dim, 512)
+        self.dense2 = nn.Linear(512, 512)
+        self.dense3 = nn.Linear(512, 512)
+        self.dense4 = nn.Linear(512, 512)
+        self.dense5 = nn.Linear(512, 512)
+        self.dense6 = nn.Linear(512, 512)
+        self.dense7 = nn.Linear(512, 1)
+
+        critic_in_dim = lstm_hidden_size + critic_feature_dim
+        # print("critic_in_dim", critic_in_dim)
+        self.critic_lstm = nn.LSTM(input_size, lstm_hidden_size, batch_first=True)
+        self.critic_dense1 = nn.Linear(critic_in_dim, 512)
+        self.critic_dense2 = nn.Linear(512, 512)
+        self.critic_dense3 = nn.Linear(512, 512)
+        self.critic_dense4 = nn.Linear(512, 512)
+        self.critic_dense5 = nn.Linear(512, 512)
+        self.critic_dense6 = nn.Linear(512, 512)
+        self.critic_dense7 = nn.Linear(512, 1)
+
+        # Critic 分支：接收 LSTM 输出 + 完美信息特征
+        # critic_layers = []
+        # in_dim = lstm_hidden_size + critic_feature_dim
+        # for h in critic_mlp_sizes:
+        #     critic_layers += [nn.Linear(in_dim, h), nn.ReLU()]
+        #     in_dim = h
+        # critic_layers.append(nn.Linear(in_dim, 1))
+        # self.critic_head = nn.Sequential(*critic_layers)
+        
+
+    def forward(self, z, x, x_addition, return_value=False, flags=None,mode='train'):
+        if mode == 'train':
+            lstm_out, _ = self.actor_lstm(z)
+        else:
+            lstm_out, _ = self.critic_lstm(z)
+        lstm_out = lstm_out[:, -1, :]   # 取最后时刻输出
+        
+        emb_act = torch.cat([lstm_out,x], dim=-1)
+        
+        emb_act = self.dense1(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense2(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense3(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense4(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense5(emb_act)
+        emb_act = torch.relu(emb_act)
+        emb_act = self.dense6(emb_act)
+        emb_act = torch.relu(emb_act)
+        actor_value = self.dense7(emb_act)
+        
+        cri_lstm_out, _ = self.critic_lstm(z)
+        cri_lstm_out = cri_lstm_out[:, -1, :]   # 取最后时刻输出
+
+        x_perfect = torch.cat([x, x_addition], dim=-1)
+
+        emb_cri = torch.cat([cri_lstm_out,x_perfect], dim=-1)
+        # print('emb_cri',emb_cri.shape,x_perfect.shape,cri_lstm_out.shape)
+        
+        emb_cri = self.critic_dense1(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense2(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense3(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense4(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense5(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        emb_cri = self.critic_dense6(emb_cri)
+        emb_cri = torch.relu(emb_cri)
+        critic_value = self.critic_dense7(emb_cri)
+
+        if return_value:
+            return dict(critic_value=critic_value,actor_value=actor_value)
+        else:
+            if flags is not None and flags.exp_epsilon > 0 and np.random.rand() < flags.exp_epsilon:
+                action = torch.randint(critic_value.shape[0], (1,))[0]
+            else:
+                action = torch.argmax(critic_value,dim=0)[0]
+           
+            return dict(action=action,critic_value=critic_value,actor_value=actor_value)
+
+def compute_gae_advantage(rewards, values, dones, gamma=1.0, lam=0.95):
+    """
+    Input:
+      rewards: Tensor of shape [T], 每步即时奖励 r_t
+      values:  Tensor of shape [T+1], 包括从 s_0 到 s_T 的 V_phi(s)
+      dones:   Tensor of shape [T], 1 表示该步后游戏终止
+      
+    Returns:
+      advantages: Tensor [T], 对应每步 A_t
+    """
+    T = rewards.size(0)
+    advantages = torch.zeros(T, device=rewards.device)
+    gae = 0.0
+    for t in reversed(range(T)):
+        mask = 1.0 - dones[t]   # 如果 done，则不把下一步的价值带入
+        delta = rewards[t] + gamma * values[t+1] * mask - values[t]
+        gae = delta + gamma * lam * mask * gae
+        advantages[t] = gae
+    return advantages
+
+def select_action(agent, inc_feats, perf_feats, legal_actions, evaluate=False):
+    with torch.no_grad():
+        probs, value, logits = agent(inc_feats, perf_feats)
+        dist = Categorical(logits=logits[:, legal_actions])
+        if evaluate:
+            rel_act = torch.argmax(dist.probs, dim=-1)
+        else:
+            rel_act = dist.sample()
+        action = legal_actions[rel_act]
+        logp   = dist.log_prob(rel_act)
+    return action, logp, value
+
+# Model dict is only used in evaluation but not training
+# model_dict = {}
+# model_dict['landlord'] = LandlordLstmModel
+# model_dict['landlord_up'] = FarmerLstmModel
+# model_dict['landlord_down'] = FarmerLstmModel
 
 # Model dict is only used in evaluation but not training
 model_dict = {}
-model_dict['landlord'] = LandlordLstmModel
-model_dict['landlord_up'] = FarmerLstmModel
-model_dict['landlord_down'] = FarmerLstmModel
+model_dict['landlord'] = LandlordPerfectDou
+model_dict['landlord_up'] = FarmerPerfectDou
+model_dict['landlord_down'] = FarmerPerfectDou
+
 
 class Model:
     """
@@ -93,13 +371,13 @@ class Model:
         self.models = {}
         if not device == "cpu":
             device = 'cuda:' + str(device)
-        self.models['landlord'] = LandlordLstmModel().to(torch.device(device))
-        self.models['landlord_up'] = FarmerLstmModel().to(torch.device(device))
-        self.models['landlord_down'] = FarmerLstmModel().to(torch.device(device))
+        self.models['landlord'] = LandlordPerfectDou().to(torch.device(device))
+        self.models['landlord_up'] = FarmerPerfectDou().to(torch.device(device))
+        self.models['landlord_down'] = FarmerPerfectDou().to(torch.device(device))
 
-    def forward(self, position, z, x, training=False, flags=None):
+    def forward(self, position, z, x,x_addition, return_value=False, flags=None):
         model = self.models[position]
-        return model.forward(z, x, training, flags)
+        return model.forward(z, x,x_addition, return_value, flags)
 
     def share_memory(self):
         self.models['landlord'].share_memory()

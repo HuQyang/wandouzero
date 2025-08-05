@@ -4,5 +4,11 @@ from douzero.dmc import parser, train
 
 if __name__ == '__main__':
     flags = parser.parse_args()
-    os.environ["CUDA_VISIBLE_DEVICES"] = flags.gpu_devices
+    flags.num_actors = 2
+    flags.num_threads = 32
+    flags.load_model = False
+    flags.batch_size = 64
+    flags.sleep_time = 20
+    flags.savedir = "mini_oracle_batch16"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     train(flags)
