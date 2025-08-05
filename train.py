@@ -10,5 +10,5 @@ if __name__ == '__main__':
     flags.batch_size = 64
     flags.sleep_time = 20
     flags.savedir = "mini_oracle_batch16"
-    os.environ["CUDA_VISIBLE_DEVICES"] = "3"
+    # os.environ["CUDA_VISIBLE_DEVICES"] = "3"
     train(flags)
