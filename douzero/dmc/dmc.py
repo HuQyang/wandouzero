@@ -83,7 +83,7 @@ def learn(position,
 
         stats = {
             'mean_episode_return_'+position: torch.mean(torch.stack([_r for _r in mean_episode_return_buf[position]])).item(),
-            'loss_'+position: total_loss.item(),
+            'critic_loss'+position: tcritic_lossotal_loss.item(),
             'actor_loss_'+position: actor_loss.mean().item(),
             'mean_advantage_'+position: torch.mean(advantage).item(),
         }
@@ -183,24 +183,25 @@ def train(flags):
         log.info(f"Resuming preempted job, current stats:\n{stats}")
     
     # Initialize wandb for logging
-    import wandb
-    wandb.init(
-        project="zero-training",
-        config={
-            "unroll_length": T,
-            "batch_size": B,
-            "num_actors": flags.num_actors,
-            "total_frames": flags.total_frames
-        }
-    )
+    if flags.use_wandb:
+        import wandb
+        wandb.init(
+            project="zero-training",
+            config={
+                "unroll_length": T,
+                "batch_size": B,
+                "num_actors": flags.num_actors,
+                "total_frames": flags.total_frames
+            }
+        )
 
-    # # Create a custom logger that also logs to wandb
-    class WandbLogger:
-        def log(self, stats_dict):
-            # Log all stats to wandb
-            wandb.log(stats_dict)
-            
-    plogger = WandbLogger()
+        # # Create a custom logger that also logs to wandb
+        class WandbLogger:
+            def log(self, stats_dict):
+                # Log all stats to wandb
+                wandb.log(stats_dict)
+                
+        plogger = WandbLogger()
 
     # Starting actor processes
     for device in device_iterator:
@@ -302,10 +303,10 @@ def train(flags):
                      position_fps['landlord_up'],
                      position_fps['landlord_down'],
                      pprint.pformat(stats))
-            
-            wandb.log({
-                **stats  # Unpack all stats keys and values
-            })
+            if use_wandb:
+                wandb.log({
+                    **stats  # Unpack all stats keys and values
+                })
 
     except KeyboardInterrupt:
         return 

@@ -20621,3 +20621,16 @@ wandb: 🚀 View run at https://wandb.ai/vi_inait/zero-training/runs/48w3lalx
  'mean_episode_return_landlord': -0.3590490520000458,
  'mean_episode_return_landlord_down': 0.3590228259563446,
  'mean_episode_return_landlord_up': 0.37818247079849243}
+[INFO:1058312 dmc:294 2025-08-05 14:33:03,958] After 1264000 (L:428800 U:406400 D:428800) frames: @ 99.2 fps (avg@ 105.3 fps) (L:33.6 U:32.0 D:33.6) Stats:
+{'actor_loss_landlord': -0.02085086703300476,
+ 'actor_loss_landlord_down': -0.1710309535264969,
+ 'actor_loss_landlord_up': -1.2286638021469116,
+ 'loss_landlord': 7.358902931213379,
+ 'loss_landlord_down': 6.759888648986816,
+ 'loss_landlord_up': 5.006901264190674,
+ 'mean_advantage_landlord': 0.017334073781967163,
+ 'mean_advantage_landlord_down': 0.05933701992034912,
+ 'mean_advantage_landlord_up': 0.28705883026123047,
+ 'mean_episode_return_landlord': -0.36735212802886963,
+ 'mean_episode_return_landlord_down': 0.36736559867858887,
+ 'mean_episode_return_landlord_up': 0.3859465718269348}
