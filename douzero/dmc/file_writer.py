@@ -22,40 +22,40 @@ import os
 import time
 from typing import Dict
 
-import git
+# import git
 
 
-def gather_metadata() -> Dict:
-    date_start = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
-    # gathering git metadata
-    try:
-        repo = git.Repo(search_parent_directories=True)
-        git_sha = repo.commit().hexsha
-        git_data = dict(
-            commit=git_sha,
-            branch=repo.active_branch.name,
-            is_dirty=repo.is_dirty(),
-            path=repo.git_dir,
-        )
-    except git.InvalidGitRepositoryError:
-        git_data = None
-    # gathering slurm metadata
-    if 'SLURM_JOB_ID' in os.environ:
-        slurm_env_keys = [k for k in os.environ if k.startswith('SLURM')]
-        slurm_data = {}
-        for k in slurm_env_keys:
-            d_key = k.replace('SLURM_', '').replace('SLURMD_', '').lower()
-            slurm_data[d_key] = os.environ[k]
-    else:
-        slurm_data = None
-    return dict(
-        date_start=date_start,
-        date_end=None,
-        successful=False,
-        git=git_data,
-        slurm=slurm_data,
-        env=os.environ.copy(),
-    )
+# def gather_metadata() -> Dict:
+#     date_start = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')
+#     # gathering git metadata
+#     try:
+#         repo = git.Repo(search_parent_directories=True)
+#         git_sha = repo.commit().hexsha
+#         git_data = dict(
+#             commit=git_sha,
+#             branch=repo.active_branch.name,
+#             is_dirty=repo.is_dirty(),
+#             path=repo.git_dir,
+#         )
+#     except git.InvalidGitRepositoryError:
+#         git_data = None
+#     # gathering slurm metadata
+#     if 'SLURM_JOB_ID' in os.environ:
+#         slurm_env_keys = [k for k in os.environ if k.startswith('SLURM')]
+#         slurm_data = {}
+#         for k in slurm_env_keys:
+#             d_key = k.replace('SLURM_', '').replace('SLURMD_', '').lower()
+#             slurm_data[d_key] = os.environ[k]
+#     else:
+#         slurm_data = None
+#     return dict(
+#         date_start=date_start,
+#         date_end=None,
+#         successful=False,
+#         git=git_data,
+#         slurm=slurm_data,
+#         env=os.environ.copy(),
+#     )
 
 
 class FileWriter:
@@ -73,12 +73,12 @@ class FileWriter:
         # metadata gathering
         if xp_args is None:
             xp_args = {}
-        self.metadata = gather_metadata()
+        # self.metadata = gather_metadata()
         # we need to copy the args, otherwise when we close the file writer
         # (and rewrite the args) we might have non-serializable objects (or
         # other nasty stuff).
-        self.metadata['args'] = copy.deepcopy(xp_args)
-        self.metadata['xpid'] = self.xpid
+        # self.metadata['args'] = copy.deepcopy(xp_args)
+        # self.metadata['xpid'] = self.xpid
 
         formatter = logging.Formatter('%(message)s')
         self._logger = logging.getLogger('palaas/out')
@@ -120,8 +120,8 @@ class FileWriter:
         if os.path.exists(self.paths['meta']):
             self._logger.warning('Path to meta file already exists. '
                                  'Not overriding meta.')
-        else:
-            self._save_metadata()
+        # else:
+        #     self._save_metadata()
 
         # self._logger.info('Saving messages to %s', self.paths['msg'])
         if os.path.exists(self.paths['msg']):
